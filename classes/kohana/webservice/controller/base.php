@@ -28,21 +28,8 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	}
 
 	public function after() {
-		$view = null;
 		$format = $this->read_output_format();
-		$c = strtolower($this->request->controller);
-		$a = strtolower($this->request->action);
-		$paths = array(
-			"$c".DIRECTORY_SEPARATOR."$a",
-			"$c",
-			"webservice".DIRECTORY_SEPARATOR."default",
-		);
-		foreach ($paths as $path) {
-			if (Kohana::find_file('views'.DIRECTORY_SEPARATOR.$path, $format)) {
-				$view = View::factory("$path".DIRECTORY_SEPARATOR."$format");
-				break;
-			}
-		}
+		$view = $this->view_for_format($format);
 		if ($view) {
 			$view->content = $this->content;
 			$view->uri = $this->request->uri();
@@ -97,6 +84,34 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 			throw new WebService_Exception(406, "No supported accept types found");
 		}
 		return $format;
+	}
+
+	/**
+	 * Find view for requested format. Default implementation searches
+	 * in these locations:
+	 *   views/<controller>/<action>/<format>
+	 *   views/<controller>/<format>
+	 *   views/webservice/default/<format>
+	 *
+	 * To increase performance by skipping these directory searches, override
+	 * this method and explicitly set the view location.
+	 */
+	protected function view_for_format($format) {
+		$view = null;
+		$c = strtolower($this->request->controller);
+		$a = strtolower($this->request->action);
+		$paths = array(
+			"$c".DIRECTORY_SEPARATOR."$a",
+			"$c",
+			"webservice".DIRECTORY_SEPARATOR."default",
+		);
+		foreach ($paths as $path) {
+			if (Kohana::find_file('views'.DIRECTORY_SEPARATOR.$path, $format)) {
+				$view = View::factory("$path".DIRECTORY_SEPARATOR."$format");
+				break;
+			}
+		}
+		return $view;
 	}
 
 	public function action_invalid() {
