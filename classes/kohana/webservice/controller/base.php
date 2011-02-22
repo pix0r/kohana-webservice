@@ -7,6 +7,11 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	 */
 	protected $content = null;
 
+	/**
+	 * Output format (HTML/JSON/XML/etc)
+	 */
+	protected $output_format = null;
+
 	protected $_action_map = array(
 		'GET'    => 'index',
 		'PUT'    => 'update',
@@ -24,12 +29,13 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	);
 
 	public function before() {
+		$this->_content_type = $this->read_output_format();		
 		$this->remap_request_action();
+		$this->output_format = $this->read_output_format();
 	}
 
 	public function after() {
-		$format = $this->read_output_format();
-		$view = $this->view_for_format($format);
+		$view = $this->view_for_format($this->output_format);
 		if ($view) {
 			$view->content = $this->content;
 			$view->uri = $this->request->uri();
@@ -47,6 +53,42 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		} else {
 			$this->request->action = $this->_action_map[Request::$method];
 		}
+	}
+
+
+	protected function request_data() {
+		static $request_data = NULL;
+
+		if ($request_data !== NULL) {
+			return $request_data;
+		}
+
+		if (isset($_GET['data'])) {
+			$request_data = $_GET['data'];
+			if (is_string($request_data) && strlen($request_data)) {
+				$request_data = json_decode($request_data);
+			}
+		}
+
+		$input = file_get_contents('php://input');
+		if ($input === FALSE) {
+			throw new WebService_Exception(500, "error_reading_input");
+		}
+		
+		switch ($this->_content_type) {
+		case 'json':
+			$data = json_decode($input);
+			if ($data == NULL) {
+				throw new WebService_Exception(500, "invalid_json");
+			}
+			$request_data = $data;
+			break;
+
+		default:
+			$request_data = $input;
+
+		}
+		return $request_data;
 	}
 
 	protected function read_output_format() {
