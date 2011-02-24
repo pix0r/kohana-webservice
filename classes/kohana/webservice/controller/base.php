@@ -8,10 +8,18 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	protected $content = null;
 
 	/**
+	 * Input format (JSON/XML/etc)
+	 */
+	protected $input_format = null;
+
+	/**
 	 * Output format (HTML/JSON/XML/etc)
 	 */
 	protected $output_format = null;
 
+	/**
+	 * Map of HTTP verbs to controller actions
+	 */
 	protected $_action_map = array(
 		'GET'    => 'index',
 		'PUT'    => 'update',
@@ -19,21 +27,52 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		'DELETE' => 'delete',
 	);
 
+	/**
+	 * Save currently requested action
+	 */
 	protected $_action_requested = '';
 
+	/**
+	 * List of all available formats and their MIME types
+	 */
 	protected $_format_map = array(
 		'html'			=> array('application/html', 'application/xhtml', 'text/html'),
 		'json'			=> array('application/json', 'text/json'),
 		'xml'			=> array('application/xml', 'text/xml'),
 		'php'			=> array('application/vnd.php.serialized'),
+		'form'			=> array('application/x-www-form-urlencoded'),
 	);
 
+	/**
+	 * Formats allowed for input
+	 */
+	protected $_allowed_input_formats = array(
+		'json',
+		'form',
+		'xml',
+	);
+
+	/**
+	 * Formats allowed for output
+	 */
+	protected $_allowed_output_formats = array(
+		'html',
+		'json',
+		'xml',
+		'php',
+	);
+
+	/**
+	 * Determine output format & map HTTP verb to action
+	 */
 	public function before() {
-		$this->_content_type = $this->read_output_format();		
-		$this->remap_request_action();
 		$this->output_format = $this->read_output_format();
+		$this->remap_request_action();
 	}
 
+	/**
+	 * Find and render the view for the specified output format
+	 */
 	public function after() {
 		$view = $this->view_for_format($this->output_format);
 		if ($view) {
@@ -45,6 +84,11 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		}
 	}
 
+	/**
+	 * Translate HTTP verb into a request action
+	 *
+	 * Original request action stored in $this->_action_requested
+	 */
 	protected function remap_request_action() {
 		$this->_action_requested = $this->request->action;
 
@@ -55,7 +99,12 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		}
 	}
 
-
+	/**
+	 * Read and return request data
+	 *
+	 * Depending on the input type (Content-Type header, overridden by query
+	 * string __input_format), this can be raw or parsed POST data.
+	 */
 	protected function request_data() {
 		static $request_data = NULL;
 
@@ -63,34 +112,90 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 			return $request_data;
 		}
 
-		if (isset($_GET['data'])) {
-			$request_data = $_GET['data'];
-			if (is_string($request_data) && strlen($request_data)) {
-				$request_data = json_decode($request_data);
-			}
+		/**
+		 * Determine if format was explicitly set in request parameters
+		 */
+		if ($format = $this->request->param('input_format', null)) {
+		} elseif (isset($_GET['__input_format'])) {
+			$format = $_GET['__input_format'];
+		} elseif (isset($_SERVER['CONTENT_TYPE'])) {
+			$format = $this->format_for_mime_type($_SERVER['CONTENT_TYPE']);
 		}
 
-		$input = file_get_contents('php://input');
-		if ($input === FALSE) {
-			throw new WebService_Exception(500, "error_reading_input");
+		/**
+		 * Verify that specified format is allowed for input
+		 */
+		if (!empty($format) && !in_array($format, $this->_allowed_input_formats)) {
+			$format = null;
 		}
-		
-		switch ($this->_content_type) {
-		case 'json':
-			$data = json_decode($input);
-			if ($data == NULL) {
-				throw new WebService_Exception(500, "invalid_json");
+
+		if (empty($format)) {
+			$format = $this->_allowed_input_formats[0];
+		}
+
+		$this->input_format = $format;
+
+		switch ($format) {
+		case 'form':
+			if ($this->request->action == 'update') {
+				// PHP doesn't set up $_POST for PUT requests
+				$request_data = array();
+				$input = file_get_contents('php://input');
+				parse_str($input, $request_data);
+			} else {
+				$request_data = $_POST;
 			}
-			$request_data = $data;
 			break;
-
 		default:
-			$request_data = $input;
-
+			if (isset($_REQUEST['__data'])) {
+				$request_data = $_REQUEST['__data'];
+			} else {
+				$request_data = file_get_contents('php://input');
+			}
+			if ($request_data === false) {
+				throw new WebService_Exception(500, "error_reading_input");
+			}
+			break;
 		}
+
 		return $request_data;
 	}
 
+	/**
+	 * Return key for a given MIME type
+	 */
+	protected function format_for_mime_type($type_array, $whitelist = null) {
+		static $mime_map = array();
+
+		if (!is_array($type_array))
+			$type_array = array($type_array);
+
+		if (!count($mime_map)) {
+			foreach ($this->_format_map as $f => $mime_types) {
+				foreach ($mime_types as $t) {
+					$mime_map[$t] = $f;
+				}
+			}
+		}
+
+		foreach ($type_array as $mime) {
+			// Skip anything after a comma
+			$mime = preg_replace('/,.*/', '', $mime);
+			if (isset($mime_map[$mime])) {
+				if (!is_array($whitelist) || in_array($mime, $whitelist)) {
+					return $mime_map[$mime];
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Determine output format from Accept: header or format paremeter.
+	 *
+	 * Format parameter is normally read from requested file extension.
+	 */
 	protected function read_output_format() {
 		$format = null;
 
@@ -98,31 +203,15 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		 * Determine if format was explicitly set in request parameters
 		 */
 		if (!($format = $this->request->param('format', null))) {
-			/**
-			 * Build array of MIME-type mappings
-			 */
-			$mime_map = array();
-			foreach ($this->_format_map as $f => $mime_types) {
-				foreach ($mime_types as $t) {
-					$mime_map[$t] = $f;
-				}
-			}
-			/**
-			 * Scan browser accept types for matching MIME type
-			 */
-			$browser_accept_types = $this->request->accept_type();
-			foreach ($browser_accept_types as $type) {
-				if (isset($mime_map[$type])) {
-					$format = $mime_map[$type];
-					break;
-				}
-			}
+			$format = $this->format_for_mime_type($this->request->accept_type(), $this->_allowed_output_formats);
 		}
+
 		if (empty($format)) {
 			// Default format
-			$format = current(array_keys($this->_format_map));
+			$format = $this->_allowed_output_formats[0];
 		}
-		if (empty($format) || !isset($this->_format_map[$format])) {
+
+		if (empty($format) || !in_array($format, $this->_allowed_output_formats)) {
 			throw new WebService_Exception(406, "No supported accept types found");
 		}
 		return $format;
@@ -156,6 +245,9 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 		return $view;
 	}
 
+	/**
+	 * Generic handler for invalid HTTP verb
+	 */
 	public function action_invalid() {
 		$this->request->status = 405;
 		$this->request->headers['Allow'] = implode(', ', array_keys($this->_action_map));
