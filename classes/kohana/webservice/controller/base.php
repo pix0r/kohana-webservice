@@ -90,12 +90,12 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	 * Original request action stored in $this->_action_requested
 	 */
 	protected function remap_request_action() {
-		$this->_action_requested = $this->request->action;
+		$this->_action_requested = $this->request->action();
 
-		if (!isset($this->_action_map[Request::$method])) {
-			$this->request->action = 'invalid';
+		if (!isset($this->_action_map[$this->request->method()])) {
+			$this->request->action('invalid');
 		} else {
-			$this->request->action = $this->_action_map[Request::$method];
+			$this->request->action($this->_action_map[$this->request->method()]);
 		}
 	}
 
@@ -137,7 +137,7 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 
 		switch ($format) {
 		case 'form':
-			if ($this->request->action == 'update') {
+			if ($this->request->action() == 'update') {
 				// PHP doesn't set up $_POST for PUT requests
 				$request_data = array();
 				$input = file_get_contents('php://input');
@@ -229,8 +229,8 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	 */
 	protected function view_for_format($format) {
 		$view = null;
-		$c = strtolower($this->request->controller);
-		$a = strtolower($this->request->action);
+		$c = strtolower($this->request->controller());
+		$a = strtolower($this->request->action());
 		$paths = array(
 			"$c".DIRECTORY_SEPARATOR."$a",
 			"$c",
@@ -249,8 +249,8 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	 * Generic handler for invalid HTTP verb
 	 */
 	public function action_invalid() {
-		$this->request->status = 405;
-		$this->request->headers['Allow'] = implode(', ', array_keys($this->_action_map));
+		$this->request->response()->status(405);
+		$this->request->headers('Allow', implode(', ', array_keys($this->_action_map)));
 	}
 }
 
