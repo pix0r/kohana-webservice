@@ -92,10 +92,15 @@ abstract class Kohana_WebService_Controller_Base extends Controller {
 	protected function remap_request_action() {
 		$this->_action_requested = $this->request->action();
 
-		if (!isset($this->_action_map[$this->request->method()])) {
+		$method = $this->request->method();
+		if (isset($_GET['__method'])) {
+			$method = $_GET['__method'];
+		}
+
+		if (!isset($this->_action_map[$method])) {
 			$this->request->action('invalid');
 		} else {
-			$this->request->action($this->_action_map[$this->request->method()]);
+			$this->request->action($this->_action_map[$method]);
 		}
 	}
 
